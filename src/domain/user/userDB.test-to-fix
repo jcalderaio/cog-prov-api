@@ -1,0 +1,285 @@
+// jest src/domain/user/userDB.test.js --watch --collectCoverageFrom=src/domain/user/userDB.js
+const Knex = require('knex');
+const mockKnex = require('mock-knex');
+
+const tracker = mockKnex.getTracker();
+
+const UserStore = require('./userDB');
+
+const connectionProperties = {
+  client: 'pg',
+  connection: {
+    host: 'any',
+    port: 1,
+    database: 'any',
+    user: 'any',
+    password: 'any',
+    application_name: 'test'
+  },
+  pool: { min: 0, max: 3 },
+  debug: false
+};
+
+const testConn = mockKnex.mock(Knex(connectionProperties));
+
+const testContext = {
+  db: testConn
+};
+
+const userDataStore = new UserStore(testContext.db);
+
+const modelTemplate = {
+  id: ''
+};
+
+describe('Test UserDB', () => {
+  beforeEach(() => {
+    tracker.install();
+  });
+
+  afterEach(() => {
+    tracker.uninstall();
+  });
+
+  describe('count()', () => {
+    test('should return a SQL query to count users by a given reporting period using a CTE', () => {
+      const q = userDataStore.count();
+      expect(q.toString()).toEqual(expect.stringContaining('with'));
+      expect(q.toString()).toEqual(expect.stringContaining('select'));
+      expect(q.toString()).toEqual(expect.stringContaining('users'));
+      expect(q.toString()).not.toEqual(expect.stringContaining('created_at >='));
+      expect(q.toString()).not.toEqual(expect.stringContaining('created_at <='));
+    });
+
+    test('should return a SQL query allowing the count to be bound by a date range', () => {
+      const q = userDataStore.count({ startDate: '2018-01-01', endDate: '2018-04-25' });
+      expect(q.toString()).toEqual(expect.stringContaining('select'));
+      expect(q.toString()).toEqual(expect.stringContaining('created_at >='));
+      expect(q.toString()).toEqual(expect.stringContaining('created_at <='));
+      expect(q.toString()).toEqual(expect.stringContaining('2018-04-25'));
+    });
+
+    test('should return a SQL query allowing the count to be filtered by city', () => {
+      const q = userDataStore.count({ city: 'Funkytown' });
+      expect(q.toString()).toEqual(expect.stringContaining("address->>'city' ="));
+    });
+
+    test('should return a SQL query allowing the count to be filtered by state', () => {
+      const q = userDataStore.count({ state: 'AL' });
+      expect(q.toString()).toEqual(expect.stringContaining("address->>'state' ="));
+    });
+
+    test('should return a SQL query allowing the count to be filtered by org_sk', () => {
+      const q = userDataStore.count({ orgSk: 70 });
+      expect(q.toString()).toEqual(expect.stringContaining('org_sk'));
+    });
+
+    // eslint-disable-next-line max-len
+    test('should return a SQL query allowing the count to be filtered by NULL valued org_sk if `-1` is given as an `orgSk` parameter', () => {
+      const q = userDataStore.count({ orgSk: -1 });
+      expect(q.toString()).toEqual(expect.stringContaining('org_sk IS NULL'));
+    });
+
+    test('should return a SQL query allowing the reporting period to be set', () => {
+      let q = userDataStore.count({ period: 'day' });
+      expect(q.toString()).toEqual(expect.stringContaining("DATE_TRUNC('day', created_at) AS reporting_period"));
+
+      q = userDataStore.count({ period: 'week' });
+      expect(q.toString()).toEqual(expect.stringContaining("DATE_TRUNC('week', created_at) AS reporting_period"));
+
+      q = userDataStore.count({ period: 'year' });
+      expect(q.toString()).toEqual(expect.stringContaining("DATE_TRUNC('year', created_at) AS reporting_period"));
+
+      q = userDataStore.count({ period: 'century' });
+      expect(q.toString()).toEqual(expect.stringContaining("DATE_TRUNC('month', created_at) AS reporting_period"));
+    });
+  });
+
+  describe('list()', () => {
+    test('should return a SQL query to list users', () => {
+      const q = userDataStore.list();
+      expect(q.toString()).toEqual(expect.stringContaining('select'));
+      expect(q.toString()).toEqual(expect.stringContaining('users'));
+      expect(q.toString()).not.toEqual(expect.stringContaining('created_at >='));
+      expect(q.toString()).not.toEqual(expect.stringContaining('created_at <='));
+    });
+
+    test('should return a SQL query to list users within a date range', () => {
+      const q = userDataStore.list({ startDate: '2018-04-01', endDate: '2018-04-25' });
+      expect(q.toString()).toEqual(expect.stringContaining('select'));
+      expect(q.toString()).toEqual(expect.stringContaining('created_at >='));
+      expect(q.toString()).toEqual(expect.stringContaining('created_at <='));
+    });
+
+    test('should return a SQL query to list users filtered by city', () => {
+      const q = userDataStore.list({ city: 'Funkytown' });
+      expect(q.toString()).toEqual(expect.stringContaining("address->>'city' ="));
+    });
+
+    test('should return a SQL query to list users filtered by state', () => {
+      const q = userDataStore.list({ state: 'AL' });
+      expect(q.toString()).toEqual(expect.stringContaining("address->>'state' ="));
+    });
+
+    test('should return a SQL query to list users filtered by org_sk', () => {
+      const q = userDataStore.list({ orgSk: 70 });
+      expect(q.toString()).toEqual(expect.stringContaining('org_sk'));
+    });
+
+    xtest('should return a SQL query to list users filtered by NULL org_sk if `-1` is given', () => {
+      const q = userDataStore.list({ orgSk: -1 });
+      expect(q.toString()).toEqual(expect.stringContaining('org_sk IS NULL'));
+    });
+
+    test('should be able to return a query to retrieve a list of all "direct" organizations only', () => {
+      const q = userDataStore.list({ directOnly: true });
+      const queryString = q.toString();
+      expect(queryString).toEqual(expect.stringContaining('direct_email IS NOT NULL'));
+    });
+
+    test('should return a SQL query to list users filtered by userType', () => {
+      const q = userDataStore.list({ userType: 'Healthshare, DIRECT Messaging' });
+      expect(q.toString()).toEqual(expect.stringContaining('healthshare_id IS NOT NULL'));
+      expect(q.toString()).toEqual(expect.stringContaining('direct_email IS NOT NULL'));
+    });
+
+    test('should return a SQL query to list users filtered by userType', () => {
+      const q = userDataStore.list({ userType: 'Healthshare' });
+      expect(q.toString()).toEqual(expect.stringContaining('healthshare_id IS NOT NULL'));
+      expect(q.toString()).toEqual(expect.stringContaining('direct_email IS NULL'));
+    });
+
+    test('should return a SQL query to list users filtered by userType', () => {
+      const q = userDataStore.list({ userType: 'DIRECT Messaging' });
+      expect(q.toString()).toEqual(expect.stringContaining('healthshare_id IS NULL'));
+      expect(q.toString()).toEqual(expect.stringContaining('direct_email IS NOT NULL'));
+    });
+
+    test('should return a SQL query to list users filtered by userType', () => {
+      const q = userDataStore.list({ userType: 'eSante Only' });
+      expect(q.toString()).toEqual(expect.stringContaining('healthshare_id IS NULL'));
+      expect(q.toString()).toEqual(expect.stringContaining('direct_email IS NULL'));
+    });
+  });
+
+  describe('buildFilter()', () => {
+    test('should return a SQL query to retrieve records from a `users` table', () => {
+      const q = userDataStore.buildFilter();
+      expect(q.toString()).toEqual(expect.stringContaining('select'));
+      expect(q.toString()).toEqual(expect.stringContaining('users'));
+    });
+
+    // eslint-disable-next-line max-len
+    test('should accept a criteria object with `match` key (string value) which informs WHERE ILIKE clauses in the generated SQL query', () => {
+      const q = userDataStore.buildFilter({ match: 'username' });
+      expect(q.toString()).toEqual(expect.stringContaining('ilike'));
+      expect(q.toString()).toEqual(expect.stringContaining('username'));
+    });
+  });
+
+  test('should generate valid query for getting user record', () => {
+    let trackerQuery;
+    tracker.on('query', query => {
+      query.response([modelTemplate]);
+      trackerQuery = query;
+    });
+    return userDataStore.get({ userId: 'user1' }).then(() => {
+      // expect(trackerQuery.sql).toEqual('select * from "esante"."users" where "user_id" = $1 limit $2');
+      expect(trackerQuery.sql).toEqual(expect.stringContaining('select'));
+      expect(trackerQuery.sql).toEqual(expect.stringContaining('user_id'));
+    });
+  });
+
+  test('should generate valid query to save user record', () => {
+    let trackerQuery;
+    tracker.on('query', query => {
+      query.response([modelTemplate]);
+      trackerQuery = query;
+    });
+    const retrieveQuery = userDataStore
+      .save({
+        id: 'user1',
+        firstName: 'John',
+        lastName: 'Smith',
+        address: { street1: 'Main St', street2: 'Apt 202' }
+      })
+      .then(result => {
+        expect(result).toBeDefined();
+        expect(trackerQuery.sql).toEqual(expect.stringContaining('insert'));
+        expect(trackerQuery.sql).toEqual(expect.stringContaining('first_name'));
+        expect(trackerQuery.sql).not.toEqual(expect.stringContaining('John'));
+        expect(trackerQuery.sql).toEqual(expect.stringContaining('users'));
+      });
+    /* eslint-enable */
+    return retrieveQuery;
+  });
+  test('should generate valid query to delete user record', () => {
+    let trackerQuery;
+    tracker.on('query', query => {
+      query.response([modelTemplate]);
+      trackerQuery = query;
+    });
+    const retrieveQuery = userDataStore
+      .delete({
+        id: 'user1'
+      })
+      .then(result => {
+        expect(result).toBeDefined();
+        expect(trackerQuery.sql).toEqual('delete from "esante"."users" where "user_id" = $1');
+      });
+    return retrieveQuery;
+  });
+  test('should generate valid query to add delegates to user', done => {
+    tracker.on('query', (query, step) => {
+      [
+        function firstQuery() {
+          query.response([]);
+        },
+        function secondQuery() {
+          query.response([
+            { user_sk: 1, user_id: 'matt' },
+            { user_sk: 2, user_id: 'ciprian' },
+            { user_sk: 3, user_id: 'john' }
+          ]);
+        },
+        function thirdQuery() {
+          // eslint-disable-next-line
+          expect(query.sql).toEqual(
+            'insert into "esante"."delegations" ("acting_user_sk", "original_user_sk") values ($1, $2), ($3, $4)');
+          expect(tracker.queries.queries[2].bindings).toEqual([1, 2, 1, 3]);
+          done();
+        }
+      ][step - 1]();
+    });
+
+    const retrieveQuery = userDataStore.addDelegate('matt', ['ciprian, john']);
+    return retrieveQuery;
+  });
+
+  test('should generate valid query to delete delegates to user', done => {
+    tracker.on('query', (query, step) => {
+      [
+        function firstQuery() {
+          query.response([]);
+        },
+        function secondQuery() {
+          query.response([
+            { user_sk: 1, user_id: 'matt' },
+            { user_sk: 2, user_id: 'ciprian' },
+            { user_sk: 3, user_id: 'john' }
+          ]);
+        },
+        function thirdQuery() {
+          // eslint-disable-next-line
+          expect(query.sql).toEqual(
+            'delete from "esante"."delegations" where ("original_user_sk", "acting_user_sk") in (($1, $2),($3, $4))');
+          expect(tracker.queries.queries[2].bindings).toEqual([2, 1, 3, 1]);
+          done();
+        }
+      ][step - 1]();
+    });
+
+    const retrieveQuery = userDataStore.removeDelegate('matt', ['ciprian, john']);
+    return retrieveQuery;
+  });
+});
